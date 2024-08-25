@@ -1,3 +1,5 @@
 websocket-client
 gspread
 oauth2client
+gspread
+ccxt
