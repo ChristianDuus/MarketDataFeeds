@@ -1,6 +1,14 @@
 import json
+import os
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+
+# Load the config file
+with open("config.json") as config_file:
+    config = json.load(config_file)
+
+# Retrieve the path from the config
+json_keyfile_name = config.get("GOOGLE_APPLICATION_CREDENTIALS")
 
 def setup_google_sheets(json_keyfile_name, sheet_id):
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -9,11 +17,10 @@ def setup_google_sheets(json_keyfile_name, sheet_id):
     sheet = client.open_by_key(sheet_id).sheet1
     return sheet
 
-json_keyfile_name = "C:/Users/cduus/MarketDataFeeds/ServiceAccountCredentials.json"
+# Continue with the rest of your code
 sheet_id = "1rzcGKK4dMGWhthJQWn7wSSLpaVehNs5zV1GmSZ1yVZU"
 sheet = setup_google_sheets(json_keyfile_name, sheet_id)
 
-# Continue with your WebSocket setup
 from exchanges.binance import BinanceWebSocket
 from config import BINANCE_SYMBOLS
 
@@ -41,6 +48,5 @@ def on_open(ws):
     print("WebSocket connection opened")
 
 if __name__ == "__main__":
-    # Binance WebSocket
     binance_ws = BinanceWebSocket(BINANCE_SYMBOLS, on_message, on_error, on_close, on_open)
     binance_ws.start()

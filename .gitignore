@@ -1,5 +1,6 @@
 credentials.json
 client_secret.json
 ServiceAccountCredentials.json
+config.json
 __pycache__/
 *.pyc
