@@ -1,17 +1,30 @@
-from exchanges.binance import BinanceWebSocket
-from config import BINANCE_SYMBOLS, SHEET_NAME, JSON_KEYFILE_NAME
+import json
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 
-def setup_google_sheets(json_keyfile_name, sheet_name):
+def setup_google_sheets(json_keyfile_name, sheet_id):
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     creds = ServiceAccountCredentials.from_json_keyfile_name(json_keyfile_name, scope)
     client = gspread.authorize(creds)
-    sheet = client.open(sheet_name).sheet1
+    sheet = client.open_by_key(sheet_id).sheet1
     return sheet
 
+json_keyfile_name = "C:/Users/cduus/MarketDataFeeds/ServiceAccountCredentials.json"
+sheet_id = "1rzcGKK4dMGWhthJQWn7wSSLpaVehNs5zV1GmSZ1yVZU"
+sheet = setup_google_sheets(json_keyfile_name, sheet_id)
+
+# Continue with your WebSocket setup
+from exchanges.binance import BinanceWebSocket
+from config import BINANCE_SYMBOLS
+
 def update_sheet(sheet, data):
-    sheet.append_row([data['E'], data['s'], data['c']])
+    try:
+        print("Attempting to update the sheet")
+        ticker_data = data['data']  # Access the 'data' key
+        sheet.append_row([ticker_data['E'], ticker_data['s'], ticker_data['c']])
+        print("Sheet updated successfully")
+    except Exception as e:
+        print(f"Failed to update sheet: {e}")
 
 def on_message(ws, message):
     data = json.loads(message)
@@ -28,8 +41,6 @@ def on_open(ws):
     print("WebSocket connection opened")
 
 if __name__ == "__main__":
-    sheet = setup_google_sheets(JSON_KEYFILE_NAME, SHEET_NAME)
-    
     # Binance WebSocket
     binance_ws = BinanceWebSocket(BINANCE_SYMBOLS, on_message, on_error, on_close, on_open)
     binance_ws.start()
