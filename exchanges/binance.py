@@ -60,7 +60,7 @@ def on_open(ws):
 # Entry point for starting the WebSocket
 def start_binance_websocket():
     binance_ws = BinanceWebSocket(
-        symbols=BINANCE_SYMBOLS,
+        symbols=BINANCE_PAIRS,
         on_message_callback=on_message,
         on_error_callback=on_error,
         on_close_callback=on_close,
