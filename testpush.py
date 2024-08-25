@@ -1,26 +1,39 @@
+import json
 import gspread
+import time
 from oauth2client.service_account import ServiceAccountCredentials
+from exchanges.binance import BinanceWebSocket
+from config import BINANCE_PAIRS
 
+BINANCE_PAIRS = ["btcusdt", "ethusdt", "bnbusdt"]  # Temporarily set to a single pair
 
-def setup_google_sheets(json_keyfile_name, sheet_id):
-    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    creds = ServiceAccountCredentials.from_json_keyfile_name(json_keyfile_name, scope)
-    client = gspread.authorize(creds)
-    sheet = client.open_by_key(sheet_id).sheet1
-    return sheet
-
-
-def test_google_sheet_connection():
-    json_keyfile_name = "C:/Users/cduus/MarketDataFeeds/ServiceAccountCredentials.json"
-    sheet_id = "1rzcGKK4dMGWhthJQWn7wSSLpaVehNs5zV1GmSZ1yVZU"
-
-    sheet = setup_google_sheets(json_keyfile_name, sheet_id)
-
+def main():
     try:
-        sheet.append_row(["Test Timestamp", "Test Symbol", "Test Price"])
-        print("Test row added successfully.")
+        binance_ws = BinanceWebSocket(
+            symbols=[symbol for symbol in BINANCE_PAIRS],
+            on_message_callback=on_message,
+            on_error_callback=on_error,
+            on_close_callback=on_close,
+            on_open_callback=on_open
+        )
+        binance_ws.start()
     except Exception as e:
-        print(f"Error during test write: {e}")
+        print(f"Exception in main: {e}")
 
+def on_message(ws, message):
+    try:
+        print("Received message:", message)
+    except Exception as e:
+        print(f"Exception in on_message: {e}")
 
-test_google_sheet_connection()
+def on_error(ws, error):
+    print(f"Error: {error}")
+
+def on_close(ws):
+    print("WebSocket closed")
+
+def on_open(ws):
+    print("WebSocket connection opened")
+
+if __name__ == "__main__":
+    main()
