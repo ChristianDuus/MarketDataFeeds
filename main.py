@@ -2,7 +2,7 @@ import json
 import gspread
 import time
 from oauth2client.service_account import ServiceAccountCredentials
-from exchanges.binance import BinanceWebSocket
+from exchanges.binance import BinanceWebSocket # What about any other exchanges
 from config import BINANCE_PAIRS
 
 # Set the depth of the order book (number of levels to retrieve)
