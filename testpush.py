@@ -3,9 +3,10 @@ import gspread
 import time
 from oauth2client.service_account import ServiceAccountCredentials
 from exchanges.binance import BinanceWebSocket
-from config import BINANCE_PAIRS
 
-BINANCE_PAIRS = ["btcusdt", "ethusdt", "bnbusdt"]  # Temporarily set to a single pair
+BINANCE_PAIRS = ["btcusdt", "ethusdt"]  # Temporarily set to a single pair
+
+# Script to ensure we can subscribe to a static set of two pairs from Binance WebSocket
 
 def main():
     try:
