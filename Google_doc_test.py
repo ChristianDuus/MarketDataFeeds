@@ -1,28 +1,8 @@
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 
-"""
-def test_google_sheets():
-    try:
-        # Set up Google Sheets API
-        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-        creds = ServiceAccountCredentials.from_json_keyfile_name('ServiceAccountCredentials.json', scope)
-        client = gspread.authorize(creds)
-
-        # Open the Google Sheet
-        sheet = client.open_by_key('1rzcGKK4dMGWhthJQWn7wSSLpaVehNs5zV1GmSZ1yVZU').sheet1
-
-        # Test fetching data from the sheet
-        data = sheet.get_all_records()
-        print("Current Google Sheet data:", data)
-    except Exception as e:
-        print(f"Failed to access Google Sheets: {e}")
-
-# Run the test
-test_google_sheets() 
-"""
-
-
+# Script to validate that we can push a set of static data to the spreadsheet,
+# that is, confirming if we are can authenticate to the API and push a dataset
 def test_google_sheets_update():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     creds = ServiceAccountCredentials.from_json_keyfile_name('ServiceAccountCredentials.json', scope)
