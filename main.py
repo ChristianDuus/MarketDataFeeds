@@ -4,6 +4,7 @@ import time
 from oauth2client.service_account import ServiceAccountCredentials
 from exchanges.binance import BinanceWebSocket
 from exchanges.okx import OKXWebSocket
+from exchanges.kraken import KrakenWebSocket
 from exchanges.coinbase import connect as coinbase_connect
 import config
 
@@ -36,6 +37,14 @@ def on_message(ws, message, exchange):
     try:
         data = json.loads(message)
 
+        # Process Kraken data and handle symbol, bids, and asks
+        if exchange == 'kraken':
+            symbol = data.get('symbol')
+            bids = data.get('bids', [])
+            asks = data.get('asks', [])
+            if bids or asks:
+                update_google_sheet(symbol, bids[:depth], asks[:depth], exchange)
+
         # Handle Binance symbol extraction
         if exchange == 'binance':
             symbol = data.get('s').lower()  # Binance symbols are lowercase
@@ -66,8 +75,8 @@ def on_message(ws, message, exchange):
                 return
 
         # Log bids and asks to verify they're correctly parsed
-        print(f"Parsed bids for {symbol}: {bids[:depth]}")
-        print(f"Parsed asks for {symbol}: {asks[:depth]}")
+        # print(f"Parsed bids for {symbol}: {bids[:depth]}")
+        # print(f"Parsed asks for {symbol}: {asks[:depth]}")
 
         # Update order book data in memory
         order_books[symbol]['bids'] = bids
@@ -79,7 +88,9 @@ def on_message(ws, message, exchange):
     except Exception as e:
         print(f"Exception in on_message for {exchange}: {e}")
 
+
 def update_google_sheet(symbol, bids, asks, exchange):
+    # print(f"Preparing to update Google Sheets for {symbol} on {exchange}")
     try:
         global last_update_times
         current_time = time.time()
@@ -95,17 +106,25 @@ def update_google_sheet(symbol, bids, asks, exchange):
             )
             return
 
+        # Log the bids and asks before processing
+        # print(f"Received bids for {symbol}: {bids}")
+        # print(f"Received asks for {symbol}: {asks}")
+
+        # Limit the number of bids and asks based on the 'depth'
+        limited_bids = bids[:depth]
+        limited_asks = asks[:depth]
+
         # Ensure the number of bids and asks matches the depth
-        while len(bids) < depth:
-            bids.append([None, None])
-        while len(asks) < depth:
-            asks.append([None, None])
+        while len(limited_bids) < depth:
+            limited_bids.append([None, None])
+        while len(limited_asks) < depth:
+            limited_asks.append([None, None])
 
         # Prepare data in the format for Google Sheets
         data = []
         for i in range(depth):
-            bid = bids[i]
-            ask = asks[i]
+            bid = limited_bids[i]
+            ask = limited_asks[i]
             data.append([
                 f'Level {i+1}',
                 bid[0] if bid[0] is not None else 'N/A',
@@ -116,11 +135,11 @@ def update_google_sheet(symbol, bids, asks, exchange):
 
         start_row = (list(order_books.keys()).index(symbol) * (depth + 3)) + 2
 
-        # Log the data to be sent to Google Sheets
-        print(f"Data to update for {symbol} on {exchange}: {data}")
+        # Log the data that is going to be sent to Google Sheets
+        # print(f"Data to update for {symbol} on {exchange}: {data}")
 
         end_row = start_row + depth - 1
-        print(f"Updating Google Sheet for {symbol} from row {start_row} to {end_row}")
+        # print(f"Updating Google Sheet for {symbol} from row {start_row} to {end_row}")
 
         # Push data to Google Sheets
         sheet.batch_clear([f'B{start_row}:F{end_row}'])
@@ -129,7 +148,7 @@ def update_google_sheet(symbol, bids, asks, exchange):
         sheet.update(range_name=f'B{start_row}:F{end_row}', values=data)
 
         last_update_times[symbol] = current_time
-        print(f"Google Sheet updated for {symbol} on {exchange} at {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(last_update_times[symbol]))}")
+        # print(f"Google Sheet updated for {symbol} on {exchange} at {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(last_update_times[symbol]))}")
 
     except Exception as e:
         print(f"Exception in update_google_sheet: {e}")
@@ -161,6 +180,7 @@ def main():
             websockets.append(binance_ws)
             print("Connected to Binance.")
 
+        # Connect to OKX if enabled in config
         if config.exchanges['okx']['enabled']:
             okx_pairs = config.exchanges['okx']['pairs']
             okx_ws = OKXWebSocket(
@@ -174,8 +194,25 @@ def main():
             websockets.append(okx_ws)
             print("Connected to OKX.")
 
+        if config.exchanges['kraken']['enabled']:
+            kraken_pairs = config.exchanges['kraken']['pairs']  # Ensure the symbol list is provided
+            if not kraken_pairs:
+                raise ValueError("No pairs provided for Kraken in the config.")
+
+            print(f"Kraken pairs: {kraken_pairs}")  # Add a print to verify pairs
+            kraken_ws = KrakenWebSocket(
+                symbols=kraken_pairs,  # Make sure symbols are passed correctly
+                on_message_callback=lambda ws, msg: on_message(ws, msg, 'kraken'),
+                on_error_callback=lambda ws, err: on_error(ws, err, 'kraken'),
+                on_close_callback=lambda ws: on_close(ws),
+                on_open_callback=lambda ws: on_open(ws, 'kraken')
+            )
+            kraken_ws.start()
+            websockets.append(kraken_ws)
+            print("Connected to Kraken.")
+
         # Connect to Coinbase if enabled in config
-        if config.exchanges['coinbase']['enabled']:  # Check if Coinbase is enabled in the config
+        if config.exchanges['coinbase']['enabled']:
             print("Starting Coinbase WebSocket...")
             coinbase_connect()  # Start the Coinbase WebSocket connection
             print("Connected to Coinbase.")
