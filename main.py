@@ -4,6 +4,7 @@ import time
 from oauth2client.service_account import ServiceAccountCredentials
 from exchanges.binance import BinanceWebSocket
 from exchanges.okx import OKXWebSocket
+from exchanges.coinbase import connect as coinbase_connect
 import config
 
 # Set the depth of the order book (number of levels to retrieve)
@@ -172,6 +173,12 @@ def main():
             okx_ws.start()
             websockets.append(okx_ws)
             print("Connected to OKX.")
+
+        # Connect to Coinbase if enabled in config
+        if config.exchanges['coinbase']['enabled']:  # Check if Coinbase is enabled in the config
+            print("Starting Coinbase WebSocket...")
+            coinbase_connect()  # Start the Coinbase WebSocket connection
+            print("Connected to Coinbase.")
 
         while True:
             pass
