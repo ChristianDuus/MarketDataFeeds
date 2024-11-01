@@ -6,6 +6,8 @@ from exchanges.binance import BinanceWebSocket
 from exchanges.okx import OKXWebSocket
 from exchanges.kraken import KrakenWebSocket
 from exchanges.coinbase import connect as coinbase_connect
+from config import normalize_pair  # Updated import
+from data_utils import format_order_data
 import config
 from collections import defaultdict
 
@@ -27,6 +29,7 @@ sheet = client.open_by_key('1rzcGKK4dMGWhthJQWn7wSSLpaVehNs5zV1GmSZ1yVZU').sheet
 
 order_books = {}
 last_update_times = {}
+google_sheet_cache = {}
 
 
 def normalize_pair(pair: str, exchange: str) -> str:
@@ -60,31 +63,51 @@ def aggregate_books(pair, book, exchange):
         print(f"Error: Could not normalize pair '{pair}' for exchange '{exchange}'. Skipping subscription.")
         return
 
+    # Ensure pair exists in aggregated_books with bids and asks initialized
+    if normalized_pair not in aggregated_books:
+        aggregated_books[normalized_pair] = {'bids': {}, 'asks': {}}
+
     exchange_code = exchange[:2].capitalize()  # Use the first two letters of the exchange name
 
     # Aggregate bids
-    for price, quantity in book.get('bids', []):
-        price_str = f"{price:.8f}"  # Keep price as string for dictionary key
-        if float(quantity) > 0:  # Only include valid levels with quantities
+    for entry in book.get('bids', []):
+        try:
+            price, quantity = float(entry[0]), float(entry[1])
+        except (ValueError, IndexError):
+            print(f"Invalid bid entry {entry} for {normalized_pair} from {exchange}. Skipping.")
+            continue
+
+        price_str = f"{price:.8f}"  # Format price as string to be a dictionary key
+        if quantity > 0:  # Only include valid levels with quantities
             if price_str in aggregated_books[normalized_pair]['bids']:
-                aggregated_books[normalized_pair]['bids'][price_str]['quantity'] += float(quantity)
+                aggregated_books[normalized_pair]['bids'][price_str]['quantity'] += quantity
                 aggregated_books[normalized_pair]['bids'][price_str]['contributors'].add(exchange_code)
             else:
-                aggregated_books[normalized_pair]['bids'][price_str] = {'quantity': float(quantity),
-                                                                        'contributors': {exchange_code}}
+                aggregated_books[normalized_pair]['bids'][price_str] = {
+                    'quantity': quantity,
+                    'contributors': {exchange_code}
+                }
 
     # Aggregate asks
-    for price, quantity in book.get('asks', []):
-        price_str = f"{price:.8f}"  # Keep price as string for dictionary key
-        if float(quantity) > 0:  # Only include valid levels with quantities
+    for entry in book.get('asks', []):
+        try:
+            price, quantity = float(entry[0]), float(entry[1])
+        except (ValueError, IndexError):
+            print(f"Invalid ask entry {entry} for {normalized_pair} from {exchange}. Skipping.")
+            continue
+
+        price_str = f"{price:.8f}"  # Format price as string to be a dictionary key
+        if quantity > 0:  # Only include valid levels with quantities
             if price_str in aggregated_books[normalized_pair]['asks']:
-                aggregated_books[normalized_pair]['asks'][price_str]['quantity'] += float(quantity)
+                aggregated_books[normalized_pair]['asks'][price_str]['quantity'] += quantity
                 aggregated_books[normalized_pair]['asks'][price_str]['contributors'].add(exchange_code)
             else:
-                aggregated_books[normalized_pair]['asks'][price_str] = {'quantity': float(quantity),
-                                                                        'contributors': {exchange_code}}
+                aggregated_books[normalized_pair]['asks'][price_str] = {
+                    'quantity': quantity,
+                    'contributors': {exchange_code}
+                }
 
-    # Limit to top 'depth' bids/asks sorted by price (convert keys back to floats for sorting)
+    # Sort and limit to top 'depth' levels
     aggregated_books[normalized_pair]['bids'] = dict(sorted(
         aggregated_books[normalized_pair]['bids'].items(),
         key=lambda x: -float(x[0])
@@ -96,8 +119,9 @@ def aggregate_books(pair, book, exchange):
     )[:depth])
 
     print(
-        f"Aggregated book for {normalized_pair}: Bids = {len(aggregated_books[normalized_pair]['bids'])}, Asks = {len(aggregated_books[normalized_pair]['asks'])}")
-
+        f"Aggregated book for {normalized_pair}: Bids = {len(aggregated_books[normalized_pair]['bids'])}, "
+        f"Asks = {len(aggregated_books[normalized_pair]['asks'])}"
+    )
 
 def initialize_order_books():
     for exchange, config_data in config.exchanges.items():
@@ -122,7 +146,6 @@ def process_order_book(symbol, bids, asks):
 
 
 def on_message_kraken(ws, message):
-    """Dedicated handler for Kraken WebSocket messages."""
     try:
         parsed_data = json.loads(message)
         print(f"Kraken message received: {parsed_data}")
@@ -137,21 +160,24 @@ def on_message_kraken(ws, message):
                 print(f"Full Kraken message: {json.dumps(parsed_data, indent=2)}")
 
         elif isinstance(parsed_data, dict) and 'bids' in parsed_data and 'asks' in parsed_data:
-            symbol = parsed_data['symbol']
-            bids = parsed_data['bids']
-            asks = parsed_data['asks']
-            print(f"Processing order book for symbol: {symbol}")
+            symbol = parsed_data.get('symbol')
+            normalized_symbol = normalize_pair(symbol, 'kraken')  # Updated reference
 
-            normalized_pair = normalize_pair(symbol, 'kraken')
-            bids = [bid[:2] for bid in bids]  # Keep only price and size
-            asks = [ask[:2] for ask in asks]  # Keep only price and size
+            bids = [bid[:2] for bid in parsed_data.get('bids', [])]
+            asks = [ask[:2] for ask in parsed_data.get('asks', [])]
 
-            if bids or asks:
-                print(f"Updating Kraken order book for {symbol}: Bids = {len(bids)}, Asks = {len(asks)}")
-                unique_key = f"kraken_{normalized_pair}"
-                update_google_sheet(unique_key, bids, asks, 'kraken')
+            formatted_data = format_order_data('kraken', {
+                "bids": bids,
+                "asks": asks,
+                "timestamp": parsed_data.get("timestamp")
+            })
+
+            if formatted_data["bids"] or formatted_data["asks"]:
+                print(f"Updating Kraken order book for {normalized_symbol}: Bids = {len(bids)}, Asks = {len(asks)}")
+                unique_key = f"kraken_{normalized_symbol}"
+                update_google_sheet(unique_key, formatted_data["bids"], formatted_data["asks"], 'kraken')
             else:
-                print(f"No bids or asks found for {symbol}")
+                print(f"No bids or asks found for {normalized_symbol}")
         else:
             print(f"Unhandled Kraken message structure: {parsed_data}")
     except Exception as e:
@@ -164,95 +190,103 @@ def on_message(ws, message, exchange):
         parsed_data = json.loads(message)
         print(f"Received message from {exchange}: {parsed_data}")
 
-        pair = None
-        order_book = None
-
+        # Filter messages to process only those with valid order book data
         if exchange == 'binance':
-            pair = parsed_data.get('s', '').lower()
+            if 'b' in parsed_data and 'a' in parsed_data:
+                symbol = parsed_data.get('s', '').lower()
+                normalized_symbol = normalize_pair(symbol, 'binance')
 
-            print(f"Debug: Bids structure from Binance: {parsed_data.get('b', [])}")
-            print(f"Debug: Asks structure from Binance: {parsed_data.get('a', [])}")
+                # Process and format bids and asks
+                bids = [[float(bid[0]), float(bid[1])] for bid in parsed_data.get('b', [])]
+                asks = [[float(ask[0]), float(ask[1])] for ask in parsed_data.get('a', [])]
+                formatted_data = {"bids": bids, "asks": asks}
 
-            try:
-                bids = [[float(bid[0]), float(bid[1])] for bid in parsed_data.get('b', []) if
-                        isinstance(bid, list) and len(bid) == 2]
-                asks = [[float(ask[0]), float(ask[1])] for ask in parsed_data.get('a', []) if
-                        isinstance(ask, list) and len(ask) == 2]
-                print(f"Processed Bids: {bids}")
-                print(f"Processed Asks: {asks}")
-            except (IndexError, ValueError, TypeError) as e:
-                print(f"Error processing bids/asks: {e}")
+            else:
+                print("Non-order book message received from Binance, ignoring.")
                 return
 
-            order_book = {
-                'bids': bids,
-                'asks': asks
-            }
-
         elif exchange == 'okx':
-            pair = parsed_data['arg']['instId'].lower()
-            order_book = parsed_data.get('data', [{}])[0]
+            if 'arg' in parsed_data and 'data' in parsed_data:
+                symbol = parsed_data['arg'].get('instId', '').lower()
+                normalized_symbol = normalize_pair(symbol, 'okx')
+                data_entry = parsed_data.get('data', [{}])[0]
+                formatted_data = {"bids": data_entry.get("bids", []), "asks": data_entry.get("asks", [])}
 
-        if pair:
-            normalized_pair = normalize_pair(pair, exchange)
-            unique_key = f"{exchange}_{normalized_pair}"
-
-            if order_book:
-                print(
-                    f"Debug: Order book data for '{unique_key}' - Bids: {order_book['bids']}, Asks: {order_book['asks']}")
-
-                if config.aggregation_enabled:
-                    print(f"Debug: Aggregation is enabled for pair '{normalized_pair}'")
-                    aggregate_books(pair, order_book, exchange)
-                    push_aggregated_data_to_spreadsheet(normalized_pair)
-                else:
-                    print(f"Debug: Aggregation disabled - pushing data to sheet for '{unique_key}'")
-                    update_google_sheet(unique_key, order_book['bids'], order_book['asks'], exchange)
             else:
-                print(f"Error: No order book data found for pair '{unique_key}' on '{exchange}'.")
+                print("Non-order book message received from OKX, ignoring.")
+                return
+
+        # Process order book data if available
+        if formatted_data and (formatted_data["bids"] or formatted_data["asks"]):
+            unique_key = f"{exchange}_{normalized_symbol}"
+            print(f"Processing order book for '{unique_key}': Bids = {len(formatted_data['bids'])}, Asks = {len(formatted_data['asks'])}")
+
+            if config.aggregation_enabled:
+                print(f"Aggregation is enabled for pair '{normalized_symbol}'")
+                aggregate_books(normalized_symbol, formatted_data, exchange)
+                push_aggregated_data_to_spreadsheet(normalized_symbol)
+            else:
+                print(f"Aggregation disabled - pushing data to sheet for '{unique_key}'")
+                update_google_sheet(unique_key, formatted_data["bids"], formatted_data["asks"], exchange)
+        else:
+            print(f"Error: No valid order book data for '{normalized_symbol}' on '{exchange}'.")
+
     except Exception as e:
         print(f"Error encountered in {exchange} WebSocket: {str(e)}")
 
-
-def update_google_sheet(symbol, bids, asks, exchange):
-    """Update Google Sheets with order book data."""
+def update_google_sheet(symbol, bids, asks, exchange, update_interval=10):
+    """Update Google Sheets with order book data with a reduced update frequency."""
     try:
-        global last_update_times
+        global last_update_times, google_sheet_cache, sheet
         current_time = time.time()
 
         unique_key = symbol
 
-        if unique_key not in order_books:
-            print(f"Error: Symbol '{unique_key}' not found in order_books for exchange '{exchange}'.")
-            return
+        # Initialize the cache entry if it doesn't exist
+        if unique_key not in google_sheet_cache:
+            google_sheet_cache[unique_key] = {"bids": [], "asks": []}
 
-        limited_bids = bids[:depth]
-        limited_asks = asks[:depth]
+        # Update the cache with the latest order book data
+        google_sheet_cache[unique_key] = {
+            "bids": bids[:depth],  # Limit to specified depth
+            "asks": asks[:depth]
+        }
 
-        while len(limited_bids) < depth:
-            limited_bids.append([None, None])
-        while len(limited_asks) < depth:
-            limited_asks.append([None, None])
+        # Only update the sheet if enough time has passed since the last update
+        if current_time - last_update_times.get(unique_key, 0) >= update_interval:
+            # Prepare data for Google Sheets
+            data = [
+                [f'Level {i + 1}', bid[0] or 'N/A', bid[1] or 'N/A', ask[0] or 'N/A', ask[1] or 'N/A']
+                for i, (bid, ask) in enumerate(zip(google_sheet_cache[unique_key]["bids"], google_sheet_cache[unique_key]["asks"]))
+            ]
 
-        data = [[f'Level {i + 1}', bid[0] or 'N/A', bid[1] or 'N/A', ask[0] or 'N/A', ask[1] or 'N/A'] for i, (bid, ask)
-                in enumerate(zip(limited_bids, limited_asks))]
+            # Calculate start and end rows for this symbol's data in the sheet
+            try:
+                start_row = (list(order_books.keys()).index(unique_key) * (depth + 3)) + 2
+                end_row = start_row + depth - 1
+            except ValueError:
+                print(f"Error: Could not find '{unique_key}' in order_books keys for row indexing.")
+                return
 
-        start_row = (list(order_books.keys()).index(unique_key) * (depth + 3)) + 2
-        end_row = start_row + depth - 1
+            # Initialize header in Google Sheets if this symbol is new
+            if last_update_times.get(unique_key, 0) == 0:
+                try:
+                    sheet.update(range_name=f'A{start_row - 1}', values=[[f'{unique_key.upper()} {exchange.upper()} Market Data']])
+                    sheet.update(range_name=f'B{start_row - 1}', values=[['Level', 'Bid Price', 'Bid Quantity', 'Ask Price', 'Ask Quantity']])
+                except Exception as e:
+                    print(f"Exception during initial header update for '{unique_key}': {e}")
+                    return
 
-        if last_update_times[unique_key] == 0:
-            sheet.update(range_name=f'A{start_row - 1}',
-                         values=[[f'{unique_key.upper()} {exchange.upper()} Market Data']])
-            sheet.update(range_name=f'B{start_row - 1}',
-                         values=[['Level', 'Bid Price', 'Bid Quantity', 'Ask Price', 'Ask Quantity']])
-
-        sheet.update(range_name=f'B{start_row}:F{end_row}', values=data)
-
-        last_update_times[unique_key] = current_time
-        print(f"Google Sheet updated for {unique_key} on {exchange}")
+            # Update Google Sheets with the cached order book data
+            try:
+                sheet.update(range_name=f'B{start_row}:F{end_row}', values=data)
+                last_update_times[unique_key] = current_time
+                print(f"Google Sheet updated for {unique_key} on {exchange}")
+            except Exception as e:
+                print(f"Exception during data update for '{unique_key}': {e}")
 
     except Exception as e:
-        print(f"Exception in update_google_sheet: {e}")
+        print(f"General exception in update_google_sheet: {e}")
 
 
 def push_aggregated_data_to_spreadsheet(normalized_pair):
