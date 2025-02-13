@@ -63,22 +63,28 @@ def aggregate_books(pair, book, exchange):
         print(f"Error: Could not normalize pair '{pair}' for exchange '{exchange}'. Skipping subscription.")
         return
 
-    # Ensure pair exists in aggregated_books with bids and asks initialized
+    # Ensure the aggregated_books entry is initialized
     if normalized_pair not in aggregated_books:
         aggregated_books[normalized_pair] = {'bids': {}, 'asks': {}}
 
-    exchange_code = exchange[:2].capitalize()  # Use the first two letters of the exchange name
+    exchange_code = exchange[:2].capitalize()  # e.g., "Bi" for Binance, "Ok" for OKX
 
-    # Aggregate bids
+    # Process bids
     for entry in book.get('bids', []):
         try:
-            price, quantity = float(entry[0]), float(entry[1])
+            # Convert price and quantity to float immediately
+            price = float(entry[0])
+            quantity = float(entry[1])
         except (ValueError, IndexError):
             print(f"Invalid bid entry {entry} for {normalized_pair} from {exchange}. Skipping.")
             continue
 
-        price_str = f"{price:.8f}"  # Format price as string to be a dictionary key
-        if quantity > 0:  # Only include valid levels with quantities
+        # Format the price as a string with fixed precision (8 decimal places)
+        price_str = f"{price:.8f}"
+        # (Optional) Debug logging: print the key and its type
+        # print(f"Using bid price key: {price_str} (type: {type(price_str)})")
+
+        if quantity > 0:
             if price_str in aggregated_books[normalized_pair]['bids']:
                 aggregated_books[normalized_pair]['bids'][price_str]['quantity'] += quantity
                 aggregated_books[normalized_pair]['bids'][price_str]['contributors'].add(exchange_code)
@@ -88,16 +94,20 @@ def aggregate_books(pair, book, exchange):
                     'contributors': {exchange_code}
                 }
 
-    # Aggregate asks
+    # Process asks
     for entry in book.get('asks', []):
         try:
-            price, quantity = float(entry[0]), float(entry[1])
+            price = float(entry[0])
+            quantity = float(entry[1])
         except (ValueError, IndexError):
             print(f"Invalid ask entry {entry} for {normalized_pair} from {exchange}. Skipping.")
             continue
 
-        price_str = f"{price:.8f}"  # Format price as string to be a dictionary key
-        if quantity > 0:  # Only include valid levels with quantities
+        price_str = f"{price:.8f}"
+        # (Optional) Debug logging: print the key and its type
+        # print(f"Using ask price key: {price_str} (type: {type(price_str)})")
+
+        if quantity > 0:
             if price_str in aggregated_books[normalized_pair]['asks']:
                 aggregated_books[normalized_pair]['asks'][price_str]['quantity'] += quantity
                 aggregated_books[normalized_pair]['asks'][price_str]['contributors'].add(exchange_code)
@@ -107,7 +117,7 @@ def aggregate_books(pair, book, exchange):
                     'contributors': {exchange_code}
                 }
 
-    # Sort and limit to top 'depth' levels
+    # Sort and limit to top 'depth' levels for bids and asks
     aggregated_books[normalized_pair]['bids'] = dict(sorted(
         aggregated_books[normalized_pair]['bids'].items(),
         key=lambda x: -float(x[0])
@@ -122,6 +132,7 @@ def aggregate_books(pair, book, exchange):
         f"Aggregated book for {normalized_pair}: Bids = {len(aggregated_books[normalized_pair]['bids'])}, "
         f"Asks = {len(aggregated_books[normalized_pair]['asks'])}"
     )
+
 
 def initialize_order_books():
     for exchange, config_data in config.exchanges.items():
